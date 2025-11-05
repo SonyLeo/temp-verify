@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Server A - iframe</title>
+    <script src="https://unpkg.com/@opentiny/next-sdk@0.1.10/dist/index.umd.js"></script>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        text-align: center;
+      }
+      h2 {
+        margin: 0;
+      }
+      .status {
+        margin-top: 10px;
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 4px;
+        font-size: 14px;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🌐 MCP Server A (iframe)</h2>
+    <div class="status" id="status">正在初始化...</div>
+
+    <script type="module">
+      import { MessageChannelServerTransport } from 'https://cdn.jsdelivr.net/npm/@opentiny/next@0.2.1/+esm';
+
+      const { WebMcpServer, z } = WebMCP;
+
+      async function init() {
+        try {
+          const statusEl = document.getElementById('status');
+          statusEl.textContent = '正在启动 Server A...';
+
+          // 定义端点名称
+          const ENDPOINT_NAME = 'server-a-endpoint';
+
+          // 创建 MessageChannelServerTransport
+          const serverTransport = new MessageChannelServerTransport(ENDPOINT_NAME);
+
+          // 先监听连接（必须在创建 Server 之前）
+          // 注意：listen() 是异步的，但不会阻塞等待客户端连接
+          await serverTransport.listen().then(() => {
+            console.log('✅ Transport 监听已启动');
+          });
+
+          statusEl.textContent = '传输层已就绪，正在创建 Server...';
+
+          // 创建 MCP Server
+          const server = new WebMcpServer({
+            name: 'iframe-server-a',
+            version: '1.0.0'
+          });
+
+          // 注册工具：生成问候语
+          server.registerTool(
+            'generate-greeting',
+            {
+              title: '生成问候语',
+              description: '根据姓名和语言生成个性化问候语',
+              inputSchema: {
+                name: z.string(),
+                language: z.enum(['zh', 'en'])
+              }
+            },
+            async ({ name, language }) => {
+              const greetings = {
+                zh: `你好，${name}！欢迎使用 MCP Server A！`,
+                en: `Hello, ${name}! Welcome to MCP Server A!`
+              };
+              const greeting = greetings[language] || greetings.en;
+              console.log('生成问候语:', greeting);
+              return {
+                content: [{ type: 'text', text: greeting }]
+              };
+            }
+          );
+
+          // 连接 Server 和 Transport
+          await server.connect(serverTransport);
+          statusEl.textContent = '✅ Server A 运行中';
+
+          // 通知父窗口 Server 已准备就绪
+          window.parent.postMessage({ type: 'server-a-ready' }, '*');
+
+          console.log('✅ Server A 已启动并准备就绪');
+        } catch (error) {
+          console.error('❌ Server A 初始化失败:', error);
+          document.getElementById('status').textContent = `❌ 初始化失败: ${error.message}`;
+        }
+      }
+
+      init();
+    </script>
+  </body>
+</html>

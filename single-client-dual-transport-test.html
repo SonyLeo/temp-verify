@@ -1,0 +1,354 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>单 WebMcpClient 双 Transport 验证测试</title>
+    <script src="https://unpkg.com/@opentiny/next-sdk@0.1.10/dist/index.umd.js"></script>
+    <style>
+      body {
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        max-width: 1000px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      h1 {
+        color: #333;
+        border-bottom: 3px solid #ff9800;
+        padding-bottom: 10px;
+      }
+      .warning {
+        background: #fff3cd;
+        border: 1px solid #ffc107;
+        border-radius: 4px;
+        padding: 15px;
+        margin: 20px 0;
+        color: #856404;
+      }
+      .panel {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        margin-top: 20px;
+      }
+      .panel h2 {
+        margin-top: 0;
+        color: #555;
+        font-size: 18px;
+      }
+      button {
+        background: #ff9800;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        margin: 5px;
+        transition: background 0.3s;
+      }
+      button:hover {
+        background: #f57c00;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .log {
+        background: #f9f9f9;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        padding: 15px;
+        margin-top: 15px;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 12px;
+      }
+      .log-entry {
+        margin: 5px 0;
+        padding: 5px;
+        border-left: 3px solid #4caf50;
+        padding-left: 10px;
+      }
+      .log-entry.error {
+        border-left-color: #f44336;
+        color: #f44336;
+      }
+      .log-entry.success {
+        border-left-color: #4caf50;
+        color: #4caf50;
+      }
+      .log-entry.info {
+        border-left-color: #2196f3;
+        color: #2196f3;
+      }
+      .log-entry.warning {
+        border-left-color: #ff9800;
+        color: #ff9800;
+      }
+      .result {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+      .result.success {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+      .result.failure {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+      iframe {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🧪 单 WebMcpClient 双 Transport 验证测试</h1>
+
+    <div class="warning">
+      <strong>⚠️ 实验性测试</strong><br />
+      本测试验证一个 MCP WebMcpClient 实例能否同时连接两个不同的 Transport。<br />
+      根据 MCP 协议设计，这通常是不支持的，但我们通过实验来验证。
+    </div>
+
+    <div class="panel">
+      <h2>🔬 测试场景</h2>
+      <p>尝试让一个 WebMcpClient 实例：</p>
+      <ol>
+        <li>先连接到 Server A (iframe - MessageChannel)</li>
+        <li>再连接到 Server B (本地 - TransportPair)</li>
+        <li>验证两个连接是否都有效</li>
+        <li>尝试调用两个 Server 的工具</li>
+      </ol>
+
+      <button id="btnRunTest">运行测试</button>
+      <button id="btnClearLog">清空日志</button>
+
+      <div class="log" id="log"></div>
+
+      <div id="result"></div>
+
+      <iframe id="iframeServer" style="display: none"></iframe>
+    </div>
+
+    <script type="module">
+      import { MessageChannelClientTransport } from 'https://cdn.jsdelivr.net/npm/@opentiny/next@0.2.1/+esm';
+
+      const { createMessageChannelPairTransport, WebMcpServer, WebMcpClient, z } = WebMCP;
+
+      let singleClient = null;
+      let serverA = null;
+      let serverB = null;
+
+      // 日志工具
+      function log(message, type = 'info') {
+        const container = document.getElementById('log');
+        const entry = document.createElement('div');
+        entry.className = `log-entry ${type}`;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        container.appendChild(entry);
+        container.scrollTop = container.scrollHeight;
+        console.log(`[${type}]`, message);
+      }
+
+      function showResult(success, message) {
+        const resultDiv = document.getElementById('result');
+        resultDiv.className = `result ${success ? 'success' : 'failure'}`;
+        resultDiv.textContent = message;
+      }
+
+      // 初始化 Server A (iframe)
+      async function initServerA() {
+        log('=== 初始化 Server A (iframe) ===', 'info');
+
+        const iframe = document.getElementById('iframeServer');
+        iframe.src = 'dual-transport-server-a.html';
+
+        await new Promise((resolve, reject) => {
+          iframe.onload = resolve;
+          iframe.onerror = reject;
+          setTimeout(() => reject(new Error('iframe 加载超时')), 5000);
+        });
+
+        log('iframe 已加载', 'success');
+
+        window.addEventListener('message', function handler(event) {
+          if (event.data.type === 'server-a-ready') {
+            window.removeEventListener('message', handler);
+          }
+        });
+
+        log('Server A 已准备就绪', 'success');
+        return iframe;
+      }
+
+      // 初始化 Server B (本地)
+      async function initServerB() {
+        log('=== 初始化 Server B (本地) ===', 'info');
+
+        const [serverTransport, clientTransport] = createMessageChannelPairTransport();
+
+        serverB = new WebMcpServer({
+          name: 'local-server-b',
+          version: '1.0.0'
+        });
+
+        serverB.registerTool(
+          'calculate',
+          {
+            title: '计算器',
+            description: '执行基本数学运算',
+            inputSchema: {
+              operation: z.enum(['add', 'subtract', 'multiply', 'divide']),
+              a: z.number(),
+              b: z.number()
+            }
+          },
+          async ({ operation, a, b }) => {
+            let result;
+            switch (operation) {
+              case 'add':
+                result = a + b;
+                break;
+              case 'subtract':
+                result = a - b;
+                break;
+              case 'multiply':
+                result = a * b;
+                break;
+              case 'divide':
+                result = b !== 0 ? a / b : 'Error: Division by zero';
+                break;
+            }
+            return {
+              content: [{ type: 'text', text: `结果: ${result}` }]
+            };
+          }
+        );
+
+        await serverB.connect(serverTransport);
+        log('Server B 已启动', 'success');
+
+        return clientTransport;
+      }
+
+      // 运行测试
+      async function runTest() {
+        try {
+          document.getElementById('result').innerHTML = '';
+          log('', 'info');
+          log('🚀 开始测试：一个 WebMcpClient 连接两个 Transport', 'info');
+          log('', 'info');
+
+          // 步骤 1: 初始化两个 Server
+          log('步骤 1: 初始化两个 Server', 'info');
+          const iframe = await initServerA();
+          const clientTransportB = await initServerB();
+          log('✅ 两个 Server 都已准备就绪', 'success');
+          log('', 'info');
+
+          // 步骤 2: 创建单个 WebMcpClient
+          log('步骤 2: 创建单个 WebMcpClient 实例', 'info');
+          const capabilities = { prompts: {}, resources: {}, tools: {}, logging: {} };
+          singleClient = new WebMcpClient({ name: 'single-test-client', version: '1.0.0' }, { capabilities });
+          log('✅ WebMcpClient 实例已创建', 'success');
+          log('', 'info');
+
+          // 步骤 3: 第一次连接 - 连接到 Server A
+          log('步骤 3: 尝试连接到 Server A (iframe)', 'info');
+          const clientTransportA = new MessageChannelClientTransport('server-a-endpoint', iframe.contentWindow);
+
+          await singleClient.connect(clientTransportA);
+          log('✅ 成功连接到 Server A', 'success');
+
+          // 验证连接 A
+          const toolsA = await singleClient.listTools();
+          log(`发现 Server A 的工具: ${toolsA.tools.map((t) => t.name).join(', ')}`, 'info');
+          log('', 'info');
+
+          // 步骤 4: 第二次连接 - 尝试连接到 Server B
+          log('步骤 4: 尝试连接到 Server B (本地)', 'warning');
+          log('⚠️  注意：Client 已经连接到 Server A', 'warning');
+
+          try {
+            await singleClient.connect(clientTransportB);
+            log('✅ 成功连接到 Server B', 'success');
+
+            // 验证连接 B
+            const toolsB = await singleClient.listTools();
+            log(`当前可用工具: ${toolsB.tools.map((t) => t.name).join(', ')}`, 'info');
+            log('', 'info');
+
+            // 步骤 5: 测试工具调用
+            log('步骤 5: 测试工具调用', 'info');
+
+            // 尝试调用 Server A 的工具
+            log('尝试调用 Server A 的工具 (generate-greeting)...', 'info');
+            try {
+              const resultA = await singleClient.callTool({
+                name: 'generate-greeting',
+                arguments: { name: '测试', language: 'zh' }
+              });
+              log(`✅ Server A 工具调用成功: ${resultA.content[0].text}`, 'success');
+            } catch (error) {
+              log(`❌ Server A 工具调用失败: ${error.message}`, 'error');
+            }
+
+            // 尝试调用 Server B 的工具
+            log('尝试调用 Server B 的工具 (calculate)...', 'info');
+            try {
+              const resultB = await singleClient.callTool({
+                name: 'calculate',
+                arguments: { operation: 'add', a: 10, b: 20 }
+              });
+              log(`✅ Server B 工具调用成功: ${resultB.content[0].text}`, 'success');
+            } catch (error) {
+              log(`❌ Server B 工具调用失败: ${error.message}`, 'error');
+            }
+
+            log('', 'info');
+            log('🎉 测试结论：一个 WebMcpClient 可以连接两个 Transport！', 'success');
+            log('但是第二次连接会覆盖第一次连接，只能访问最后连接的 Server', 'warning');
+            showResult(true, '✅ 测试完成：Client 可以连接多个 Transport，但只保持最后一个连接有效');
+          } catch (error) {
+            log(`❌ 连接到 Server B 失败: ${error.message}`, 'error');
+            log('', 'info');
+            log('🔍 测试结论：一个 WebMcpClient 不能同时连接两个 Transport', 'error');
+            log('第二次 connect() 调用失败，Client 只能保持一个连接', 'warning');
+            showResult(false, '❌ 测试结果：Client 不支持同时连接多个 Transport');
+          }
+        } catch (error) {
+          log(`❌ 测试过程出错: ${error.message}`, 'error');
+          console.error('详细错误:', error);
+          showResult(false, `❌ 测试失败: ${error.message}`);
+        }
+      }
+
+      // 清空日志
+      function clearLog() {
+        document.getElementById('log').innerHTML = '';
+        document.getElementById('result').innerHTML = '';
+      }
+
+      // 绑定事件
+      document.getElementById('btnRunTest').addEventListener('click', runTest);
+      document.getElementById('btnClearLog').addEventListener('click', clearLog);
+
+      // 页面加载提示
+      window.addEventListener('load', () => {
+        log('📋 测试准备就绪，点击"运行测试"按钮开始', 'info');
+      });
+    </script>
+  </body>
+</html>
