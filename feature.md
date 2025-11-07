@@ -129,7 +129,7 @@ sequenceDiagram
 *   **描述**: 创建一个新的会话分享。此接口具备**幂等性**：如果使用同一个 `originalConversationId` 多次调用，只有第一次会创建新的分享，后续调用将直接返回已创建的分享信息。
 *   **认证**: **必须 (Required)**
 
-##### **请求体 (Request Body)**
+##### **请求参数 (Request Parameters)**
 *   **Content-Type**: `application/json`
 
 | 字段名 (Field) | 类型 (Type) | 是否必须 (Required) | 描述 (Description) |
